@@ -1,0 +1,48 @@
+﻿Reference,Country,System,Habitat,Landscape,Daily emergence flux (mg DM m-2 d-1),Annual emergence flux (g DM m-2 yr-1),Taxa,Intermittent,Trap method,Year of sample collection,Month of sample collection,Notes
+Bonjour et al. 2020,US,"Kings Creek, Kansas",Lotic,Grassland,8.940,3.263,Community,Y,floating emergence trap,2016,June-July,"*authors report AFDM but Methods states using Sabo et al. 2002 & Grunner 2003 length-mass regressions which is for DM , Study Area is Konza Prairie Biological Station"
+Bottger 19751,Zaire,Kalengo Stream,Lotic,Montane,10.836,3.955,Community,N,floating emergence trap,1975,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Francis et al. 2006,US,"Pick Creek, Alaska",Lotic,Montane,4.800,1.752,EPT,N,floating emergence trap,2004,June-September,sockeye salmon spawning tributary 
+Gray 1989,US,"Kings Creek, Kansas",Lotic,Grassland,20.300,7.410,Community,Y,floating emergence trap,1986-1987,June-August,
+Gumbel 19761,Germany,Kalkbach Stream,Lotic,,5.605,2.046,Community,,,1976,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Gumbel 19761,Germany,Kalkbach Stream,Lotic,,7.112,2.596,Community,,,1976,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Gumbel 19761,Germany,Breitenback Stream,Lotic,,7.203,2.629,Community,,,1976,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Gumbel 19761,Germany,Breitenback Stream,Lotic,,10.197,3.722,Community,,,1976,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Harper 1978,Canada,"I'Achigan River, Quebec",Lotic,Forest,14.493,5.290,Community,N,floating emergence trap,1972,May-November,2nd order stream
+Harper 1978,Canada,"I'Achigan River, Quebec",Lotic,Forest,19.397,7.080,Community,N,floating emergence trap,1973,May-November,2nd order stream
+Hagen and Sabo 2014,US,"Sycamore Creek, Arizona",Lotic,Desert,172.877,63.100,Community,Y,floating emergence trap,2008-2009,February-January,Results in Table 1
+Hagen and Sabo 2014,US,"San Pedro River, Arizona",Lotic,Desert,24.658,9.000,Community,Y,floating emergence trap,2008-2009,February-January,Results in Table 1
+Heinrich et al. 2014,US,"Upper Cache River, Illinois",Lotic,Mixed,45.970,16.779,Community,N,floating emergence trap,2009-2010,March-March,Trap located near weir - disrupt natural hydrology
+Heinrich et al. 2014,US,"Upper Cache River, Illinois",Lotic,Mixed,42.510,15.516,Community,N,floating emergence trap,2009-2010,March-March,Trap located midway between weirs (control)
+"Illies 1978, 19801",Germany,Breitenback Stream,Lotic,,7.233,2.640,EPT,,,1978,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+"Illies 1971, 19751",Germany,Breitenback Stream,Lotic,,10.247,3.740,Community,,,1975,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Illies 19801,Austria,Schreierbach Stream,Lotic,,9.945,3.630,EPT,,,1980,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Illies 19801,Austria,Teichbach Stream,Lotic,,13.808,5.040,EPT,,,1980,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Jackson and Fisher 1986,US,"Sycamore Creek, Arizona",Lotic,Desert,63.288,23.100,Community,Y,floating emergence trap,1982-1983,September-September,mean annual emegence production across years
+Malison et al. 2010,US,"Darby, Teton River Basin, Idaho",Lotic,Forest,13.980,5.103,Community,N,floating emergence trap,2006,June-August,mean emergence estimate from two trap locations (mid-channel and streambank)
+Malison et al. 2010,US,"Fox, Teton River Basin, Idaho",Lotic,Forest,5.995,2.188,Community,N,floating emergence trap,2006,June-August,mean emergence estimate from two trap locations (mid-channel and streambank)
+Malison et al. 2010,US,"North Fork Mahogany, Teton River Basin, Idaho",Lotic,Forest,8.675,3.166,Community,N,floating emergence trap,2006,June-August,mean emergence estimate from two trap locations (mid-channel and streambank)
+Malison et al. 2010,US,"South Leigh, Teton River Basin, Idaho",Lotic,Forest,19.030,6.946,Community,N,floating emergence trap,2006,June-August,mean emergence estimate from two trap locations (mid-channel and streambank)
+Malison et al. 2010,US,"South Fork Mahogany, Teton River Basin, Idaho",Lotic,Forest,11.140,4.066,Community,N,floating emergence trap,2006,June-August,mean emergence estimate from two trap locations (mid-channel and streambank)
+Malison et al. 2010,US,"Teton, Teton River Basin, Idaho",Lotic,Forest,22.225,8.112,Community,N,floating emergence trap,2006,June-August,mean emergence estimate from two trap locations (mid-channel and streambank)
+Moss et al. 2009,US,"Tulare Lake wetland complex, California",Lentic,Agriculture,112.433,41.038,Community,Y,floating emergence trap,2004,August-October,"mean emergence from artificially flooded agricultural fields (promote waterfowl habitat), duration of flooding ranged from 21-48 days"
+Naslund et al. 2021,US,"Mud River, West Virginia",Lotic,Forest,31.500,11.498,Community,N,floating emergence trap,2018,May-June,median insect production from the unmined mainstem sites (6-9 m wide)
+Poepperl 2000,Germany,"Lake Belau, Germany",Lotic,Agriculture,4.658,1.700,Community,N,floating emergence trap,1989-1990,April-November,lowland agricultural stream (6 m wide)
+Raitif et al. 2018,France,Multiple watersheds,Lotic,Agriculture,10.411,3.800,Community,Y,floating emergence trap,2016-2017,May-March,Table S1 gives information about each site. All sites dominated by agricultural land-use (69-92%)
+Ringe 19741,Germany,Rohrweisenback Stream,Lotic,,8.685,3.170,Community,,,1974,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Ringe 19741,Germany,Breitenback Stream,Lotic,,14.904,5.440,Community,,,1974,,From Jackson and Fisher 1986 Table 5. Original paper not in english or avalable online.
+Schriever et al. 2013,Canada,"Temporary ponds, Kingston, Ontario",Lentic,Forest,5.493,2.005,Community,Y,floating emergence trap,2010,May-August,"* value estimated from Table 2, Study Area is Queen’s Biological Station"
+Small et al. 2013,Costa Rica,Arboleda Stream,Lotic,Tropical,3.690,1.347,Community,N,floating emergence trap,2006-2007,June-July,"all streams were located in the La Selva Bio Station, Costa Rica. All stream were 2nd-3rd order (1-8 m wide) (stream parameter summary in Table 1)"
+Small et al. 2013,Costa Rica,Sura Stream,Lotic,Tropical,4.270,1.559,Community,N,floating emergence trap,2006-2007,June-July,"all streams were located in the La Selva Bio Station, Costa Rica. All stream were 2nd-3rd order (1-8 m wide) (stream parameter summary in Table 1)"
+Small et al. 2013,Costa Rica,Saltito Stream,Lotic,Tropical,9.030,3.296,Community,N,floating emergence trap,2006-2007,June-July,"all streams were located in the La Selva Bio Station, Costa Rica. All stream were 2nd-3rd order (1-8 m wide) (stream parameter summary in Table 1)"
+Small et al. 2013,Costa Rica,Carapa Stream,Lotic,Tropical,10.340,3.774,Community,N,floating emergence trap,2006-2007,June-July,"all streams were located in the La Selva Bio Station, Costa Rica. All stream were 2nd-3rd order (1-8 m wide) (stream parameter summary in Table 1)"
+Small et al. 2013,Costa Rica,Piper Stream,Lotic,Tropical,3.740,1.365,Community,N,floating emergence trap,2006-2007,June-July,"all streams were located in the La Selva Bio Station, Costa Rica. All stream were 2nd-3rd order (1-8 m wide) (stream parameter summary in Table 1)"
+Stagliano et al. 1998,US,"Talladega Wetland Ecosystem, Alabama",Lentic,Wetland,4.103,1.498,Community,N,floating emergence trap,1992-1993,December-December,mean emergence estimate across the Nymphaea zone (water surface dominted by white water lily) and open water zone
+Wesner et al 2019,US,Colorado/Wyoming Rivers,Lotic,Montane,3.671,1.340,Salmonfly,N,exuvia counts,2011-2015,June,* median estimate of Salmonfly deposition (0.67gC) used for estimate in this study
+Wesner et al. 2020,US,"Missorri River, Nebraska",Lentic,Backwater,8.800,3.212,Community,N,floating emergence trap,2014-2017,May-Sept,* used the median estimate of annual emergence production (3.2 gDM m-2 y-1) for the estimate in this study
+Whiles and Goldowitz 2001,US,"Platter River, Nebraska",Lentic,Wetland,13.973,5.100,Community,Y,floating emergence trap,1997,April-Nov,intermittent
+Whiles and Goldowitz 2001,US,"Platter River, Nebraska",Lentic,Wetland,0.712,0.260,Community,N,floating emergence trap,1997,April-Nov,perrenial
+Yuen and Dudgeon 2016,China,Lead Mine Pass Stream,Lotic,Forest,3.201,1.168,Community,N,floating emergence trap,2013-2014,May-May,4th order
+Yuen and Dudgeon 2016,China,Tai Po Kau Forest Stream,Lotic,Forest,1.954,0.713,Community,N,floating emergence trap,2013-2014,May-May,3rd order
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
