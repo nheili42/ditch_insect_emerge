@@ -1,0 +1,977 @@
+---
+title: "Heili et al."
+author: "Nate Heili"
+date: "2024-05-07"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Data analysis from Heili et al. in review at Journal of Applied Ecology. Values reported from Bayesian models may differ slightly from published values due to Monte Carlo sampling variability.
+
+NOTE: You will first need to install Stan (HMC sampler) by following the directions here: https://mc-stan.org/
+
+```{r}
+# Install Stan for Bayesian modeling
+remove.packages("rstan")
+if (file.exists(".RData")) file.remove(".RData")
+
+Sys.setenv(DOWNLOAD_STATIC_LIBV8 = 1) # only necessary for Linux without the nodejs library / headers
+install.packages("rstan", repos = "https://cloud.r-project.org/", dependencies = TRUE)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#-----Install and open the packages below-----#####
+# load packages for analysis and plotting
+library(brms)
+library(tidyverse)
+library(nlme)
+library(betareg)
+library(effects)
+library(RCurl)
+library(dataRetrieval)
+```
+
+# Read in data from GitHub 
+emerge_data = aquatic insect emergence data for ditches and streams in the Gallatin Valley, MT, USA. 
+literature = literature estimates of emergence,
+spatial = summary of length and surface area for ditches, perennial, and intermittent streams
+
+```{r}
+# Measured insect emergence from ditches and streams in the Gallatin Valley
+emerge_data <- read.csv(text=getURL("https://raw.githubusercontent.com/nheili42/ditch_insect_emerge/main/ditch.analysis.final.csv"))
+# Values of emergence flux from the literature
+literature <- read.csv(text=getURL("https://raw.githubusercontent.com/nheili42/ditch_insect_emerge/main/emergence_production_review.csv"))
+# Spatial summary of waterways in the Gallatin Valley
+spatial_summary <- read.csv(text=getURL("https://raw.githubusercontent.com/nheili42/ditch_insect_emerge/main/spatial_summary.csv"))
+```
+
+# Clean and separate data for modelling
+```{r}
+# Add 0.01mg biomass to prevent zeros (needed for Gamma distribution in model)
+emerge_data$mgm2dayDM01 <- emerge_data$bio.flux + 0.01 
+
+# remove Odonata from analysis (see Methods for reasoning)
+emerge_data <- emerge_data %>%
+  filter(Order != 'Odonata')
+
+# Separate ditch and stream emergence data
+ditch <- emerge_data[emerge_data$Type == "Ditch", ]
+stream <- emerge_data[emerge_data$Type == "Stream", ]
+```
+
+# Comparing emergence between streams and ditches
+Linear mixed effects model to test differences in emergence magnitude between ditches and streams. We used Julian day and waterbody type as fixed effects, with specific stream or ditch location and trap replicate as nested random effects. We log transform the response (emergence flux) as it is non-normal.
+```{r}
+# Convert random effects from characters to factors
+emerge_data$Location <- as.factor(emerge_data$Location)
+emerge_data$Site <- as.factor(emerge_data$Site)
+emerge_data$Trap <- as.factor(emerge_data$Trap)
+emerge_data$Type <- as.factor(emerge_data$Type)
+
+# LME model
+mod1 <- lme(log(mgm2dayDM01) ~ day_n + Type, random = ~1 | Location/Trap, data = emerge_data)
+summary(mod1)
+```
+Model Results: Emergence biomass declined significantly over time (~0.6% per day), while mean emergence did not differ significantly between streams and ditches after accounting for strong among-location variability.
+
+# Composition of emergence between streams and ditches
+Here, I compare the relative contribution of major insect orders to biomass flux between streams and ditches.
+```{r}
+prod_prop <- emerge_data %>%
+  group_by(Type, Order) %>%
+  summarise(sum_prod = sum(bio.flux)) %>%
+  mutate(tot_prod = sum(sum_prod)) %>%
+  mutate(rel_prod = sum_prod / tot_prod * 100)
+
+Fig.3B.inset <- ggplot(data = prod_prop, aes(x=Type,y=rel_prod,fill=Order)) + 
+  geom_col(width = 0.7, alpha=1) +
+  scale_y_continuous(limits = c(0,NA), expand = c(0,0)) +
+  labs(x=NULL,
+       y="Relative emergence production (%)",
+       fill = NULL) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 18, face = "bold"),
+        axis.text.x = element_text(size = 18, face = "bold"),
+        axis.text.y = element_text(size = 16),
+        legend.text = element_text(size = 14))
+
+Fig.3B.inset # not all colors or theme applied in this iteration
+```
+Over half of biomass flux in streams is attributed to EPT, whereas these orders contribute about 20% of the flux in ditches. 
+I now plot the raw values +/- SE for each order.
+
+```{r}
+community_magnitude <- emerge_data %>%
+  group_by(Type, Order) %>%
+  summarise(mean_mgm2dayDM01 = mean(mgm2dayDM01),
+            se_mgm2dayDM01 = sd(mgm2dayDM01)/sqrt(n()))
+
+Fig.3B <- ggplot(community_magnitude, aes(x = Order, y = mean_mgm2dayDM01, fill = Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = .9), alpha = 0.99, color = "black") +
+  geom_errorbar(aes(ymin = mean_mgm2dayDM01 - se_mgm2dayDM01, 
+                    ymax = mean_mgm2dayDM01 + se_mgm2dayDM01), 
+                position = position_dodge(width = 0.9), 
+                width = 0.2) +
+  labs(x = "", y = expression("Emergence production (mg m"^-2~d^-1*")")) +
+  scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
+  theme_classic() +
+    theme(axis.title = element_text(size = 18, face = "bold"),
+        axis.text.x = element_text(size = 18, face = "bold"),
+        axis.text.y = element_text(size = 16),
+        legend.text = element_text(size = 14))
+
+Fig.3B # not all colors or theme applied in this iteration
+```
+
+# Bayesian generalized additive mixed model (GAMM) to estimate daily emergence production from ditches
+GAMM to estimate posterior distribution of daily emergence flux from all ditches during the irrigation season. We used Julian day (Time) as the smoothed fixed effect, and study ditch, site, and trap as nested random effects. We fit posterior estimates to a Gamma distribution because emergence flux was not normal and positively skewed. See Methods for more details about priors and model structure. Reported estimates may differ slightly between runs due to the stochastic nature of the MCMC algorithm.
+
+```{r}
+m2b <- brm(mgm2dayDM01~s(day_n) + (1|Location/Site/Trap),data=ditch,family=Gamma(link="log"),
+          prior=c(prior(normal(1.25,2),class="Intercept"), 
+                  prior(cauchy(0,1),class="sd")),
+          chains=4,iter=2000,cores=4)
+```
+
+```{r check posterior predictive, model outcome, and extract posteriors again}
+pp_check(m2b) #posterior predictive check
+summary(m2b, priors=T) #model outcome and priors
+plot(m2b)
+```
+
+## Extract fitted estimates from m2b and summarize them
+```{r generate fitted values from posterior}
+testdata <- data.frame(day_n=seq(158,284,length=127)) # new data to condition on from Julian day 158 (7 Jun) to 284 (11 Oct)
+m2bfit <- fitted(m2b,summary=F,newdata = testdata, re_formula = NA ) # full posterior of emergence on each day bw these dates
+```
+
+### Summary statistics from fitted values of m2b
+```{r}
+# convert fitted matrix of daily emergence flux to a tibble and summarize
+m2bfit_summary <- as_tibble(m2bfit) %>%
+  summarise(across(everything(), list(
+    median = ~median(.),
+    mean = ~mean(.),
+    upper95 = ~quantile(., probs = 0.975),
+    lower95 = ~quantile(., probs = 0.025)
+  ), .names = "{col}_{.fn}"))
+
+# Summary output of emergence flux for each day be 7 June and 11 October
+m2bfit_summary <- m2bfit_summary %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_") %>%
+  mutate(day_n = as.numeric(158:284)) %>%
+  select(day_n, mean, median, upper95, lower95)
+```
+The output (m2bfit_summary) is summary values of emergence (mean, median, and 95% CrI) for each day during our study period (7 June - 11 October).
+
+# Figure comparing streams and ditches (Fig. 3)
+Code to create Fig. 3 from the manuscript comparing emergence between ditches and streams in the Gallatin Valley. I summarize data for plotting then generate the figure.
+
+```{r}
+# Mean flux values for all streams
+stream1 <- stream %>%
+  group_by(day_n) %>%
+  summarise(mean_mgm2dayDM01 = mean(mgm2dayDM01),
+            se_mgm2dayDM01 = sd(mgm2dayDM01)/sqrt(n()))
+
+# Mean flux values for each stream location
+stream_mean <- stream %>%
+  group_by(Location,day_n) %>%
+  summarise(mean_bio = mean(mgm2dayDM01))
+
+# Mean flux values for each ditch
+ditch1 <- ditch %>%
+  group_by(day_n, Location) %>%
+  summarise(median = median(mgm2dayDM01),
+            mean = mean(mgm2dayDM01),
+            se = sd(mgm2dayDM01) / sqrt(n()))
+
+# I calculate mean flux values for all ditches using a weekly average
+ditch_mean <- ditch1 %>%
+  mutate(week = floor(day_n / 7)) %>%           # make 7-day bins
+  group_by(week) %>%
+  summarize(
+    day_n = mean(day_n),                       # keeps a representative plotting date (midpoint)
+    mean_median = mean(median, na.rm = TRUE),
+    mean_mean   = mean(mean, na.rm = TRUE),
+    se_mean     = sd(mean, na.rm = TRUE) / sqrt(n())
+  )
+
+Fig.3A <- ggplot() +
+  # Ditch-level GAMM median line
+  geom_line(data = m2bfit_summary, aes(x = day_n, y = median), 
+            size = 1, color = "#9b4643") +
+  # 95% CrI from ditch-level GAMMM
+  geom_ribbon(data = m2bfit_summary, 
+              aes(x = day_n, y = median, ymin = lower95, ymax = upper95), 
+              fill = "#9b4643", alpha = 0.2) +
+  # Weekly mean in ditches from raw emergence data
+  geom_point(data = ditch_mean, aes(x = day_n, y = mean_mean), 
+             size = 5, shape = 21, fill = "#9b4643", color = "black") +
+  # Mean for each ditch
+  geom_jitter(data = ditch1, aes(x = day_n, y = mean),
+             size = 3, alpha = 0.5, color = "#9b4643") +
+  # Stream-level weekly mean
+  geom_point(data = stream1, aes(x = day_n, y = mean_mgm2dayDM01), 
+             size = 5, shape = 21, fill = "#496b9e", color = "black") +
+  # Weekly mean for each streams
+  geom_jitter(data = stream_mean, aes(x = day_n, y = mean_bio), 
+             size = 2, alpha = 0.5, shape = 21, fill = "#496b9e") +
+  # X-axis month labels
+  scale_x_continuous(breaks = c(152, 182, 213, 244, 274), 
+                     labels = c("Jun", "Jul", "Aug", "Sep", "Oct")) +
+  scale_y_log10(limits = c(3,300), expand = c(0,0)) +
+  labs(
+    x = "",
+    y = expression(bold("Emergence production (mg m"^-2~d^-1*")"))
+  ) +
+  theme_classic() +  
+  theme(
+    text = element_text(family = "Times New Roman", face = "bold"),
+    axis.title = element_text(size = 18), 
+    axis.text = element_text(size = 16, color = "black"),  
+    axis.line = element_line(color = "black"),
+    legend.text = element_text(size = 16),
+    legend.position = "none",  # Move as desired
+  )
+
+Fig.3A
+```
+To reconstruct Fig. 3B, code is above (Lines 87-97 & 109-121).
+
+#Comparing emergence among ditches during the irrigation season
+Bayesian GAMM to estimate distinct posterior distributions of daily emergence flux for each ditch during the irrigation season. Here, I model biomass flux as a function of time, fit with a spline and for each ditch. The rest of the model structure is the same as the previous GAMM.
+```{r}
+# distinct smooth function and intercept for each Location
+m3b <- brm(mgm2dayDM01~s(day_n, by = Location) + (1 | Location/Site/Trap),data=ditch,family=Gamma(link="log"),
+           prior=c(prior(normal(1.25,2),class="Intercept"), 
+                   prior(cauchy(0,1),class="sd")),
+           chains=4,iter=2000,cores=4)
+```
+
+###Check model fit
+```{r check posterior predictive, model outcome, and extract posteriors again (2)}
+pp_check(m3b,type="boxplot") #posterior predictive check
+summary(m3b, priors=T) #model outcome and priors
+```
+
+## Extract fitted estimates from m3b and summarize them
+Values will differ a bit from those in the manuscript due to simulation error, but should be close
+```{r generate fitted values from posterior (2)}
+fit_data <- expand.grid(day_n = 158:284, Location = unique(ditch$Location))
+# fitted data frame with same str as fit_data
+fitted <- as_tibble(fitted(m3b, summary=F, newdata = fit_data, allow_new_levels = TRUE))
+
+# Fitted values for each study ditch 
+FC_fitted <- as_tibble(fitted) %>%
+  select(V1:V127)
+BB_fitted <- as_tibble(fitted) %>%
+  select(V128:V254)
+LMCS_fitted <- as_tibble(fitted) %>%
+  select(V255:V381)
+LL_fitted <- as_tibble(fitted) %>%
+  select(V382:V508)
+```
+
+### Summarize fitted matrix for each Location
+```{r}
+FC_fitted_summary <- FC_fitted %>%
+  summarise(across(everything(), list(
+    median = ~median(.),
+    mean = ~mean(.),
+    sd = ~sd(.),
+    upper95 = ~quantile(., probs = 0.975),
+    lower95 = ~quantile(., probs = 0.025)
+  ), .names = "{col}_{.fn}"))
+
+FC_fitted_summary <- FC_fitted_summary %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_") %>%
+  mutate(day_n = as.numeric(158:284)) %>%
+  mutate(Location = "FC") %>%
+  select(Location, day_n, mean, median, sd, upper95, lower95)
+
+BB_fitted_summary <- BB_fitted %>%
+  summarise(across(everything(), list(
+    median = ~median(.),
+    mean = ~mean(.),
+    sd = ~sd(.),
+    upper95 = ~quantile(., probs = 0.975),
+    lower95 = ~quantile(., probs = 0.025)
+  ), .names = "{col}_{.fn}"))
+
+BB_fitted_summary <- BB_fitted_summary %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_") %>%
+  mutate(day_n = as.numeric(158:284)) %>%
+  mutate(Location = "BB") %>%
+  select(Location, day_n, mean, median, sd, upper95, lower95)
+
+LMCS_fitted_summary <- LMCS_fitted %>%
+  summarise(across(everything(), list(
+    median = ~median(.),
+    mean = ~mean(.),
+    sd = ~sd(.),
+    upper95 = ~quantile(., probs = 0.975),
+    lower95 = ~quantile(., probs = 0.025)
+  ), .names = "{col}_{.fn}"))
+
+LMCS_fitted_summary <- LMCS_fitted_summary %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_") %>%
+  mutate(day_n = as.numeric(158:284)) %>%
+  mutate(Location = "LMCS") %>%
+  select(Location, day_n, mean, median, sd, upper95, lower95)
+
+LL_fitted_summary <- LL_fitted %>%
+  summarise(across(everything(), list(
+    median = ~median(.),
+    mean = ~mean(.),
+    sd = ~sd(.),
+    upper95 = ~quantile(., probs = 0.975),
+    lower95 = ~quantile(., probs = 0.025)
+  ), .names = "{col}_{.fn}"))
+
+LL_fitted_summary <- LL_fitted_summary %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_") %>%
+  mutate(day_n = as.numeric(158:284)) %>%
+  mutate(Location = "LL") %>%
+  select(Location, day_n, mean, median, sd, upper95, lower95)
+```
+
+Put fitted values from the GAMM into one dataframe.
+```{r}
+m3b_fit <- rbind(LMCS_fitted_summary,LL_fitted_summary,BB_fitted_summary,FC_fitted_summary)
+m3b_fit$Location_Label <- ifelse(m3b_fit$Location == "BB", "Beck Border Ditch",
+                                                          ifelse(m3b_fit$Location == "FC", "Farmer's Canal",
+                                                                 ifelse(m3b_fit$Location == "LL", "Lowline Canal",
+                                                                        ifelse(m3b_fit$Location == "LMCS", "Lower Middle Creek Supply", m3b_fit$Location))))
+
+# Filter time when LL was dry (evident from temp data and weekly visual observations)
+m3b_fit <- m3b_fit %>%
+  filter(!(Location == "LL" & day_n >= 242 & day_n <= 298))
+m3b_fit %>% 
+  filter(Location == "LL" & day_n >= 196 & day_n <= 219) %>%
+  summarise(total_grams = sum(median)/1000)
+```
+##Visualize emergence among ditches during the irrigation season
+Code to reproduce Fig. 4A.
+```{r}
+# labeling each ditch as their full name for aesthetics 
+m3b_fit$Location_Label <- ifelse(m3b_fit$Location == "BB", "Beck Border Ditch",
+                            ifelse(m3b_fit$Location == "FC", "Farmer's Canal",
+                                   ifelse(m3b_fit$Location == "LL", "Lowline Canal",
+                                          ifelse(m3b_fit$Location == "LMCS", "Lower Middle Creek Supply", m3b_fit$Location))))
+# labeling each ditch as their full name for aesthetics 
+ditch1$Location_Label <- ifelse(ditch1$Location == "BB", "Beck Border Ditch",
+                            ifelse(ditch1$Location == "FC", "Farmer's Canal",
+                                   ifelse(ditch1$Location == "LL", "Lowline Canal",
+                                          ifelse(ditch1$Location == "LMCS", "Lower Middle Creek Supply", ditch1$Location))))
+
+# Figure 4A - Emergence among ditches over the irrigation season
+Fig.4A <- ggplot() +
+  geom_ribbon(data = m3b_fit, aes(x = day_n, y = median,
+                                  ymin = lower95,
+                                  ymax = upper95,
+                                  fill = Location_Label),
+              alpha = 0.5) +
+  geom_line(data = m3b_fit, aes(x = day_n, y = median)) +
+  geom_point(data = ditch1, aes(x = day_n, y = mean) , size = 2.8) +
+  geom_errorbar(data = ditch1, aes(x = day_n, y = mean, ymin = mean - se, ymax = mean + se), size = 0.7) +
+  scale_x_continuous(breaks = c(152,182, 213, 244, 274),
+                     labels = c("Jun", "Jul","Aug", "Sep", "Oct")) +
+  xlab("2022 irrigation season") + ylab(expression(bold("Emergence flux (mg m"^"-2"~"d"^"-1"*")"))) +
+  theme_classic() +
+  theme(
+    text = element_text(family = "Times New Roman", face = "bold"),
+    axis.text = element_text(size = 16, color = "black", margin = margin(t = 10)),
+    axis.text.x = element_text(size = 16, color = "black"),
+    axis.title = element_text(size = 20, face = "bold", color = "black"),
+    axis.line = element_line(color = "black"),
+    legend.position = "none",
+    strip.background = element_rect(fill = "white", color = "white"),  # Ensures white background for facet label
+    strip.text = element_text(size = 18, face = "bold", color = "black")  # Increases size of facet label text
+  ) +
+  facet_wrap(~ Location_Label, scales = "free_y") +
+  scale_y_continuous(expand = expansion(mult = c(0.015, 0)))  # Adjust the expansion
+
+Fig.4A # colors are not the same from publication
+```
+
+### Cumulative flux among ditches over the irrigation season
+```{r}
+# Calculate cumulative biomass flux
+cum.bio <- m3b_fit %>%
+  arrange(day_n) %>%
+  group_by(Location_Label) %>%
+  mutate(cumulative_biomass = cumsum(median),
+         cumulative_upper = cumsum(upper95),
+         cumulative_lower = cumsum(lower95),
+         cumulative_se = cumsum(sd / sqrt(n())),
+         total_biomass = sum(median)) %>%
+  mutate(percentage_of_total = (cumulative_biomass / total_biomass) * 100)
+
+# convert flux to grams
+cum.bio1 <- cum.bio %>%
+  select(day_n,Location_Label,cumulative_biomass,cumulative_se) %>%
+  mutate(cum_bio_g = cumulative_biomass / 1000,
+         cum_se = cumulative_se / 1000)
+```
+## Figure 4b - cumulative flux over the irrigation season
+```{r}
+# Filter dataframe so it only plots points every two weeks
+specified_days <- c(158,182, 196, 213,227, 244,258, 274)
+cum.bio1_specified <- cum.bio1 %>% filter(day_n %in% specified_days)
+
+
+Fig.4B <- ggplot(data = cum.bio1_specified, aes(x = day_n, y = cum_bio_g, color = Location_Label)) +
+  geom_line(data = cum.bio1, aes(group = Location_Label), size = 1) +
+  geom_point(aes(fill = Location_Label),size = 4) +
+  geom_errorbar(aes(ymin = cum_bio_g - cum_se, ymax = cum_bio_g + cum_se), 
+                width = 1, alpha = 0.9, size = 1) +
+  xlab("2022 irrigation season") + 
+  ylab(expression(bold("Cumulative emergence flux (g m"^"-2"*")"))) +
+  scale_y_continuous(limits = c(0, 5), expand = c(0, 0)) +
+  scale_x_continuous(breaks = c(152, 182, 213, 244, 274),
+                     labels = c("Jun", "Jul", "Aug", "Sep", "Oct")) +
+  theme_classic() +
+  theme(
+    text = element_text(family = "Times New Roman", face = "bold"),
+    axis.text = element_text(size = 16, color = "black", margin = margin(t = 10)),
+    axis.text.x = element_text(size = 18, color = "black"),
+    axis.title = element_text(size = 20, face = "bold", color = "black"),
+    axis.line = element_line(color = "black"),
+    legend.position = c(.2,.75),
+    legend.title = element_blank(),
+    strip.background = element_rect(fill = "white", color = "white"),  # Ensures white background for facet label
+    strip.text = element_text(size = 18, face = "bold", color = "black"))
+
+Fig.4B # colors are not the same from publication 
+```
+Fig 5 was produced in ArcGIS Pro. Contact nathaniel.heili@montana.edu for details on how to reproduce this figure.
+
+## Prediction for new ditches (predictive interval) to scale to valley-wide estimates
+We used the predict function in brms to generate predictions for new sites on each day. Prediction intervals incorporate uncertainty from both fixed effects and the estimated variance of random effects, resulting in wider intervals for new sites (see Bürkner 2017; Wesner et al. 2019). We used these predicted values to scale emergence to valley-wide estimates, propagating uncertainty across ditches, sites, and individual traps.
+```{r}
+testdata1 <- data.frame(day_n=seq(158,284,length=127),
+                        loc="new",
+                        year="new") # new data to condition on from 158 (7 Jun) to 284 (11 Oct)
+
+# generate predictions with uncertainty representing a Gaussian sample from the random effects term - N(0,sigma_loc:site:trap)
+m2bpr <- data.frame(predict(m2b,
+                            type="response",
+                            newdata=testdata1,
+                            re_formula=~(1 | Location/Site/Trap),
+                            allow_new_levels = TRUE,
+                            summary=FALSE,
+                            sample_new_levels = "gaussian"))
+
+# calculate summary statistics from the predictions matrix
+m2bpr_summary <- m2bpr %>%
+  summarise(across(everything(), list(
+    median = ~median(.),
+    mean = ~mean(.),
+    upper95 = ~quantile(., probs = 0.975),
+    lower95 = ~quantile(., probs = 0.025)
+  ), .names = "{col}_{.fn}"))
+
+# Summary of modeled emergence flux for each day bw 7 June and 11 October
+m2bpr_summary <- m2bpr_summary %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_") %>%
+  mutate(day_n = as.numeric(158:284)) %>%
+  select(day_n, mean, median, upper95, lower95)
+```
+Again, the output (m2bpr_summary) represents summary values of emergence (mean, median, and 95% PrI) for each day during our study period (7 June - 11 October), wider intervals than those in m2bfit.
+
+*values reported might differ slightly based on model results.
+
+## Estimating annual biomass flux from ditches during the irrigation season
+Here, I take the model results from above and combine them with half of the median emergence from the first and last day of our sampling (see Supplementary) to estimate annual emergence from ditches during a typical irrigation season (15 May to 1 November).
+
+
+First, I model the potential flux of biomass missed before and after our sampling window.
+```{r}
+# summarize and half emergence on the first day of sampling (7 June) from posterior predictive dist, then multiply by number of days missed
+backcast <- tibble(m2bpr) %>%
+  summarise(median = (0.5)*median(X1),
+            upper = (0.5)*quantile(X1,probs=0.975),
+            lower = (0.5)*quantile(X1,probs=0.025)) %>%
+  mutate(median_missed = median * 23,
+         upper_missed = upper * 23,
+         lower_missed = lower * 23) # multiply by the number of days missed
+
+# summarize and half emergence on the last day of sampling (11 Oct) from posterior predictive dist
+forecast <- tibble(m2bpr) %>%
+  summarise(median = (0.5)*median(X127),
+            upper = (0.5)*quantile(X127,probs=0.975),
+            lower = (0.5)*quantile(X127,probs=0.025)) %>%
+  mutate(median_missed = median * 20,
+         upper_missed = upper * 20,
+         lower_missed = lower * 20) # multiply by the number of days missed
+
+# Predicted amount of biomass flux missed before and after our sampling
+missed_emergence <- tibble(median = forecast$median_missed + backcast$median_missed,
+                           upper = forecast$upper_missed + backcast$upper_missed,
+                           lower = forecast$lower_missed + backcast$lower_missed)
+```
+Results indicate we missed a median of 0.4 g (95% PrI: 0.001-9.91 g) of biomass flux before and after our sampling dates. I now combine model results with this potential missed emergence to estimate total flux during the irrigation season (15 May - 1 November).
+
+```{r}
+# Sum daily emergence from 7 Jun to 11 Oct in the predictive dist matrix
+flux_sampled <- tibble(m2bpr) %>% rowSums() # sum each day of emergence 
+
+# Combine with missed biomass flux
+flux_tot <- tibble(mgm2y = flux_sampled + missed_emergence$median,
+                   gm2y = (flux_sampled + missed_emergence$median) / 1000)
+
+# Summary of annual emergence production from ditches
+flux_tot %>%
+  summarise(median = median(gm2y),
+            upper = quantile(gm2y, probs = 0.975),
+            lower = quantile(gm2y, probs = 0.025))
+```
+Emergence from ditches during the irrigation season was 4.43 g m-2 d-1 (95% PrI: 0.924-29.5).
+
+I now model annual emergence from streams by multiplying the distribution of observed fluxes (g m-2 d-1) by the number of days in a year (365 days).
+
+```{r}
+# Model annual emergence from streams
+daily_mg <- stream$mgm2dayDM01 # distribution of observed fluxes
+annual_g <- tibble(gm2y = (daily_mg / 1000) * 365)
+
+# Streams summary of annual prod
+annual_g %>%
+  summarise(median = median(gm2y),
+            upper = quantile(gm2y, probs = 0.975),
+            lower = quantile(gm2y, probs = 0.025))
+```
+Annual emergence from streams was 3.04 g m-2 d-1 (95% quantile: 0.141-58.8).
+
+# Visualize annual emergence
+Compare annual production between ditches and streams in the Gallatin Valley, and compare to literature estimates.
+```{r}
+Fig.6A <- ggplot() +
+  # Density plot for ditches
+  stat_density(data = flux_tot, aes(x = gm2y, fill = "Ditch"),
+               alpha = .9, position = "identity", color = "black") +  
+  # Density plot for literature data
+  stat_density(data = literature, aes(x = Annual.emergence.flux..g.DM.m.2.yr.1., fill = "Literature"),
+               alpha = 0.7, position = "identity", color = "black") +  
+  # Density plot for streams
+  stat_density(data = annual_g, aes(x = gm2y, fill = "Stream"),
+               alpha = 0.7, position = "identity", color = "black") +  
+  labs(
+    x = expression(bold("Annual emergence flux (g m"^-2~y^-1*")")),  # Bold x-axis title with superscripts
+    y = "Density"
+  ) +
+  scale_fill_manual(name = NULL,  # Removes the legend title
+                    values = c("Ditch" = "#89423D", "Literature" = "grey", "Stream" = "#436090"),
+                    labels = c("Ditch", "Literature", "Stream")) +  
+  scale_y_continuous(breaks = c(0, 0.5, 1.0, 1.5),
+                     labels = c("0", "0.5", "1.0", "1.5"),
+                     limits = c(0,1.5), expand = c(0,0)) +
+  scale_x_log10(breaks = c(0.1, 1, 10, 100, 1000),  
+                labels = c("0.1", "1", "10", "100", "1000"),  
+                limits = c(0.1,1000), expand = c(0,0)) +
+  #scale_x_continuous(limits = c(0, 20), expand = c(0, 0)) +
+  theme_classic() +
+  theme(
+    text = element_text(family = "Times New Roman", face = "bold"),
+    axis.title = element_text(size = 18, face = "bold"),  # Bold axis titles
+    axis.text = element_text(size = 14, face = "bold"),   # Bold axis text
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.position = c(0.8,0.7))
+
+Fig.6A
+```
+# Ditch contribution to valley-wide insect deposition
+We combined distributions of annual emergence (g m-2 y-1) and wetted area (m2) to estimate total biomass export (kg y-1) across the valley. Surface area distributions were generated by randomly sampling 1,000 values from a normal distribution defined by the mean and standard deviation of observed wetted areas for each habitat. We report the median biomass export with the 95% PrI for ditches and the 95% quantile range for streams.
+
+###Biomass export from ditches
+```{r}
+# Summary of spatial statistics for waterbodies
+head(spatial_summary)
+
+# Filter total emergence at upper 95% CrI to not inflate export estimates 
+flux_tot_filtered <- flux_tot %>%
+  filter(gm2y < quantile(gm2y, probs = 0.975))
+
+# Number of simulations
+n_sim <- 1000
+# Draw random surface areas (in m²) for ditches
+ditch_sa_samples_m2 <- rnorm(n_sim, 
+                             mean = spatial_summary$mean.sa.m2[spatial_summary$type == "ditch"],
+                             sd = spatial_summary$sd.sa.m2[spatial_summary$type == "ditch"])
+# randomly draw emergence rates
+flux_samples <- sample(flux_tot$gm2y, n_sim, replace = TRUE)
+# calculate total biomass export in kg
+ditch_total_emergence_kg_yr <- tibble(
+  export_kg_yr = (ditch_sa_samples_m2 * flux_samples) / 1000) %>%
+  mutate(Type = "Ditch")
+
+# Summary of biomass export from ditches
+ditch_total_emergence_kg_yr %>%
+  summarise(median = median(export_kg_yr),
+            upper = quantile(export_kg_yr, probs = 0.975),
+            lower = quantile(export_kg_yr, probs = 0.025))
+```
+A median of 25,000 kg of insect biomass (95% PrI: 5,000-168,000) emerged from the ditch network during the irrigation season. Export estimates are subject to change based on results from the GAMM and the surface area estimates.
+
+###Biomass export from streams
+```{r}
+# Potential streams surface area distribution
+stream_sa_samples_m2 <- rnorm(n_sim, 
+                             mean = spatial_summary$mean.sa.m2[spatial_summary$type =="perennial"], 
+                             sd = spatial_summary$sd.sa.m2[spatial_summary$type == "perennial"])
+
+# Filter total emergence at upper 95% CrI to not inflate export estimates 
+stream_annual_filtered <- annual_g %>%
+  filter(gm2y < quantile(gm2y, probs = 0.975)) # filter at upper 95% quantile
+
+# randomly draw emergence rates
+flux_sample <- sample(stream_annual_filtered, n_sim, replace = T)
+# calculate total biomass export in kg
+stream_total_emergence_kg_yr <- tibble(
+  export_kg_yr =(stream_sa_samples_m2 * flux_samples) / 1000) %>%
+  mutate(Type = "Stream")
+
+# Summary of biomass export from ditches
+stream_total_emergence_kg_yr %>%
+  summarise(median = median(export_kg_yr),
+            upper = quantile(export_kg_yr, probs = 0.975),
+            lower = quantile(export_kg_yr, probs = 0.025))
+```
+A median of 35,000 kg of insect biomass (95% quantile range: 7,000-228,000) emerged from Gallatin Valley streams over the year.
+
+###Combine export estimate from streams and ditches to compare and visualize
+```{r}
+biomass_export <- bind_rows(
+  stream_total_emergence_kg_yr,
+  ditch_total_emergence_kg_yr
+)
+
+# Summary biomass export between ditches and streams
+biomass_export %>%
+  group_by(Type) %>%
+  summarise(mean_export = mean(export_kg_yr),
+            median_export = median(export_kg_yr),
+            upper = quantile(export_kg_yr, probs = 0.975),
+            lower = quantile(export_kg_yr, probs = 0.025)) %>%
+  mutate(total_export = sum(median_export)) %>% #total export using the median value
+  group_by(Type) %>%
+  mutate(per_tot = median_export / total_export)
+
+# Density distribution of biomass export for stream and rivers 
+Fig.6B <- ggplot() +
+  # Ditch density
+  stat_density(
+    data = subset(biomass_export, Type == "Ditch"),
+    aes(x = export_kg_yr, fill = "Ditch"),
+    geom = "density",
+    position = "identity",
+    alpha = 0.8
+  ) +
+  # Stream density
+  stat_density(
+    data = subset(biomass_export, Type == "Stream"),
+    aes(x = export_kg_yr, fill = "Stream"),
+    geom = "density",
+    position = "identity",
+    alpha = 0.6
+  ) +
+  # Manual fill & color
+  scale_fill_manual(
+    name = NULL,
+    values = c("Ditch" = "#89423D", "Stream" = "#436090")
+  ) +
+  labs(
+    x = expression(bold("Biomass export (kg y"^-1*")")),
+    y = "Density"
+  ) +
+  scale_y_continuous(
+    breaks = c(0, 0.5, 1.0, 1.5),
+    labels = c("0", "0.5", "1.0", "1.5"),
+    limits = c(0, 1.5),
+    expand = c(0, 0)
+  ) +
+  scale_x_log10(
+    breaks = c(1000, 10000, 100000, 1000000),
+    labels = c("1000", "10000", "100000", "1000000"),
+    limits = c(1000, 1000000),
+    expand = c(0, 0)
+  ) +
+  theme_classic() +
+  theme(
+    text = element_text(family = "Times New Roman", face = "bold", color = "black"),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.position = c(0.8, 0.7)
+  )
+
+Fig.6B
+```
+
+###Potential birds supported by energetic fluxes from the ditch network
+Here, I replicate an approach by Wesner et al. 2020 to estimate the theoretical number of birds supported by insect emergence from the ditch network. Using this approach, I first estimate total energy flux (kJ) by converting grams of insect dry mass to to kJ using a conversion factor in Cummins and Wuycheck 1971. I then estimate an individual bird's energy demand (kJ) over the irrigation season, using a community energetic cost estimate of 3800 kJ d-1 ha-1 and 59 birds per community. For more details, see Wesner et al. 2020.
+```{r}
+# Create a distribution of number of birds supported by the ditch network
+birds <- ditch_total_emergence_kg_yr %>%
+  mutate(g_yr = export_kg_yr * 1000) %>%
+  mutate(totkJy = g_yr*23.012,#multiply grams of dry mass by 23.012 to convert to kJ (Cummins and Wuycheck 1971)
+         ind_bird_demand = 3800/59*170, #bird community in a hectare needs 3800 kJ/day and there are ~59 birds per community. This estimates how much energy an individual bird would need over the irrigation season (170 days).
+         birds_supported = totkJy/ind_bird_demand) 
+
+# Summarize the distribution
+birds %>%
+  summarise(lower95 = quantile(birds_supported,probs=0.025),
+            median = median(birds_supported),
+            upper95 = quantile(birds_supported, probs=0.975))
+```
+Results indicate a median of 53,000 birds (95% PrI: 11,00-353,000) could be supported by the ditch network over the irrigation season.
+
+# Model simulation - Influence of water scarcity on subsidy export from ditches
+Climate change is expected to advance the timing and reduce the magnitude of flow in snow-dominated river networks like the Gallatin River Watershed. These hydrologic changes will likely intensify drying regimes across ditch networks, influencing the magnitude of aquatic subsidies they provide. Using the Gallatin Gateway USGS gage (06043500), we identify how observed drying in ditches from 2022 relate to GR discharge, and use this to model potential losses to aquatic subsidies provided by the ditch network. 
+
+```{r}
+site_no <- "06043500"
+startDate <- as_date("1990-10-01")
+endDate <- as_date("2024-10-01")
+parameter <- "00060"
+
+# Download USGS gage data using dataRetrival package
+Qdat <- readNWISdv(site = site_no, parameterCd = parameter, startDate = startDate, endDate = endDate) %>%
+  addWaterYear() %>% 
+  renameNWISColumns() %>% 
+  select(-agency_cd) %>%
+  filter(waterYear <= 2022)
+
+# Assign Julian day to Qdat
+Q_clean <- Qdat %>%
+  mutate(Date = as.Date(Date),
+         jday = yday(Date))
+
+# summarize historical years
+hist_summary <- Q_clean %>%
+  filter(waterYear != 2022) %>%
+  group_by(jday) %>%
+  summarize(
+    p10 = quantile(Flow, 0.10, na.rm = TRUE),
+    p90 = quantile(Flow, 0.90, na.rm = TRUE),
+    med = median(Flow, na.rm = TRUE)
+  ) %>%
+  mutate(type = "Historical (median + range)")
+
+# 2022 data with id
+data_2022 <- Q_clean %>%
+  filter(waterYear == 2022) %>%
+  mutate(type = "2022")
+
+# Figure S5
+Fig.S5<- ggplot() +
+  geom_ribbon(data = hist_summary,
+              aes(x = jday, ymin = p10, ymax = p90, fill = "Historical range"),
+              alpha = 0.4) +
+  geom_line(data = hist_summary,
+            aes(x = jday, y = med, color = "Historical median"),
+            linewidth = 0.7) +
+  geom_line(data = data_2022,
+            aes(x = jday, y = Flow, color = "2022"),
+            linewidth = 1) +
+  geom_vline(xintercept = lubridate::yday("2022-08-01"),
+           linetype = "dashed",
+           color = "black",
+           linewidth = 0.7) +
+  scale_fill_manual(values = c("Historical range" = "gray70")) +
+  scale_color_manual(values = c("Historical median" = "black",
+                                "2022" = "red")) +
+  labs(x = "Julian day", y = "Discharge (cfs)", color = "", fill = "") +
+  scale_y_continuous(limits = c(0,8500), expand = c(0,0)) +
+  scale_x_continuous(limits = c(0,365), expand = c(0,0)) +
+  theme_classic() +
+  theme(legend.position = c(0.2, 0.7),
+        text = element_text(family = "Times New Roman", 
+                            face = "bold", 
+                            color = "black",
+                            size = 18))
+
+Fig.S5
+```
+# Matrix to draw flux values during the irrigation season
+Here, I create a matrix of emergence fluxes from 15 May to 1 November. Values between our study period (7 June - 11 October) are from the posterior distribution of the GAMM. Those outside are a random number between 1-10 mgm2d1. I chose this range as a conservative estimate of emergence outside our study period.
+
+```{r}
+# Define the study period
+orig_start <- ymd("2022-06-07")
+orig_end   <- ymd("2022-10-11")
+
+# Define the dates outside of the study period
+new_start <- ymd("2022-05-15")
+new_end   <- ymd("2022-11-01")
+
+# sequence of days before study period (15 May-6 June)
+backcast_days <- seq(new_start, orig_start - days(1), by = "day")
+# create columns of random values 1–20 for each new day
+backcast_df <- map_dfc(backcast_days, ~ runif(nrow(m2bpr), 1, 10)) %>%
+  setNames(paste0("day_", backcast_days))
+# sequence of days after study period (12 Oct-1 Nov)
+forward_days <- seq(orig_end + days(1), new_end, by = "day")
+# create columns of random values 1–20 for each new day
+forward_df <- map_dfc(forward_days, ~ runif(nrow(m2bpr), 1, 10)) %>%
+  setNames(paste0("day_", forward_days))
+
+# rename original columns to date labels for clarity
+orig_days <- seq(orig_start, orig_end, by = "day")
+
+m2bpr_named <- m2bpr %>% 
+  setNames(paste0("day_", orig_days))
+
+# combine the backcast, forecast, and modeled dataframes
+full_df <- bind_cols(
+  backcast_df,
+  m2bpr_named,
+  forward_df
+)
+```
+The result is a dataframe of emergence flux values from May 15 to 1 November.
+
+# Climate Scenario Modeling 
+Here, I use scenarios of irrigation season length (i.e., number of days ditches are wet) and spatial extent (areal extent of the network) to address the effects of climate change on biomass export. I divide the network extent equally into junior and senior water users. This is likely an assumption, and is a limitation of not having more detailed drying patterns across the network. For each scenario, I draw emergence values from the full_df created above, and surface area estimates from the distribution created in the biomass export model.
+
+### Normal year scenario
+The normal year scenario assumes senior ditches are wetted from 15 April to 1 November (170 days) and junior ditches from 15 May to 15 August (92). Here I randomly choose a row without replacement from the posterior dist (full_df) to sum across for the allocated season length.
+```{r}
+# extract column dates
+col_dates <- gsub("day_", "", names(full_df)) %>% as.Date()
+
+# Define senior user irrigation season length: 15 May - 1 Nov
+senior_cols <- names(full_df)[col_dates >= as.Date("2022-05-15") & col_dates <= as.Date("2022-11-01")]
+
+# Define junior user irrigation season length: 15 May - 15 Aug
+junior_cols <- names(full_df)[col_dates >= as.Date("2022-05-15") & col_dates <= as.Date("2022-08-15")]
+
+# randomly select 1000 rows
+set.seed(123)   # for reproducibility
+sampled_rows <- sample(nrow(full_df), 1000, replace = FALSE)
+
+# sum across columns and compute total
+normal_gm2y <- full_df[sampled_rows, ] %>%
+  transmute(
+    senior_gm2y1 = rowSums(across(all_of(senior_cols))) / 1000,
+    junior_gm2y1 = rowSums(across(all_of(junior_cols))) / 1000,
+    total_gm2y  = (senior_gm2y1 + junior_gm2y1) # combined annual production for junior and senior ditches
+  )
+
+normal_bio_export <- normal_gm2y %>%
+  mutate(half_sa_m2 = ditch_sa_samples_m2 / 2, # divide network area in half
+         export_gy1 = total_gm2y * half_sa_m2,
+         export_kgy1 = export_gy1 / 1000)
+
+```
+### Drought year scenario
+The drought year scenario assumes senior ditches are wetted from 15 April to 1 October (139 days) and junior ditches from 15 May to 15 July (61 days). 
+```{r}
+# Define senior user irrigation season length: 15 May - 1 Oct
+senior_cols <- names(full_df)[col_dates >= as.Date("2022-05-15") & col_dates <= as.Date("2022-10-01")]
+
+# Define junior user irrigation season length: 15 May - 15 July
+junior_cols <- names(full_df)[col_dates >= as.Date("2022-05-15") & col_dates <= as.Date("2022-07-15")]
+
+# randomly select 1000 rows
+set.seed(123)   # for reproducibility
+sampled_rows <- sample(nrow(full_df), 1000, replace = FALSE)
+
+# sum across columns and compute total
+normal_gm2y <- full_df[sampled_rows, ] %>%
+  transmute(
+    senior_gm2y1 = rowSums(across(all_of(senior_cols))) / 1000,
+    junior_gm2y1 = rowSums(across(all_of(junior_cols))) / 1000,
+    total_gm2y  = (senior_gm2y1 + junior_gm2y1)
+  )
+
+drought_bio_export <- normal_gm2y %>%
+  mutate(half_sa_m2 = ditch_sa_samples_m2 / 2, # divide network area in half
+         export_gy1 = total_gm2y * half_sa_m2,
+         export_kgy1 = export_gy1 / 1000)
+```
+### Severe drought year scenario
+The severe drought year assumed senior ditches were wetted from 15 April to 1 August (78 days) and junior ditches from 15 May to 1 July (47 days). 
+```{r}
+# Define senior user irrigation season length: 15 May - 1 Aug
+senior_cols <- names(full_df)[col_dates >= as.Date("2022-05-15") & col_dates <= as.Date("2022-8-01")]
+
+# Define junior user irrigation season length: 15 May - 1 July
+junior_cols <- names(full_df)[col_dates >= as.Date("2022-05-15") & col_dates <= as.Date("2022-07-01")]
+
+# randomly select 1000 rows
+set.seed(123)   # for reproducibility
+sampled_rows <- sample(nrow(full_df), 1000, replace = FALSE)
+
+# sum across columns and compute total
+normal_gm2y <- full_df[sampled_rows, ] %>%
+  transmute(
+    senior_gm2y1 = rowSums(across(all_of(senior_cols))) / 1000,
+    junior_gm2y1 = rowSums(across(all_of(junior_cols))) / 1000,
+    total_gm2y  = (senior_gm2y1 + junior_gm2y1)
+  )
+
+severe_drought_bio_export <- normal_gm2y %>%
+  mutate(half_sa_m2 = ditch_sa_samples_m2 / 2, # divide network area in half
+         export_gy1 = total_gm2y * half_sa_m2,
+         export_kgy1 = export_gy1 / 1000)
+```
+## Combine scenarios to generate one dataframe
+```{r}
+# Combine scenarios to generate one dataframe
+export_simulation <- bind_rows(
+  normal_bio_export %>% 
+    transmute(scenario = "normal", export_kgy1 = export_kgy1),
+  drought_bio_export %>% 
+    transmute(scenario = "drought", export_kgy1 = export_kgy1),
+  severe_drought_bio_export %>% 
+    transmute(scenario = "severe drought", export_kgy1 = export_kgy1)
+)
+
+# Summary of scenario
+scenario_summary <- export_simulation %>%
+  group_by(scenario) %>%
+  summarise(median_export = median(export_kgy1),
+            upper_export = quantile(export_kgy1, probs = 0.975),
+            lower_export = quantile(export_kgy1, probs = 0.025)) %>%
+  mutate(kg_lost = (median_export - median_export[scenario == "normal"]),
+         percent_lost = kg_lost / median_export[scenario == "normal"] * 100)
+```
+Shifts in agricultural use during drought (irrigation season shorted by ~ 30 days) and severe drought (irrigation season shortened by ~ 70 days) years could result in 23 and 53% declines in subsidy export from the ditch network, respectively. Thus, climate- and irrigator-driven changes to agricultural water use will likely diminish energetic subsidies provided by western US ditch networks. 
+
+# Figure 7 - Water scarcity figure
+```{r}
+Fig.7 <- ggplot(export_simulation, 
+       aes(x = fct_reorder(scenario, export_kgy1, .fun = median, .desc = TRUE), 
+           y = export_kgy1, 
+           fill = scenario)) +
+  geom_boxplot(width = 0.5, outlier.alpha = 0.3) +
+  scale_fill_manual(
+    values = c(
+      "normal" = "#D1D5DE",
+      "drought" = "#E3B505",
+      "severe drought" = "#A31621"
+    ),
+    name = NULL,
+    labels = c("Normal", "Drought", "Severe Drought")
+  ) +
+  scale_y_log10(limits = c(1000, 1000000), expand = c(0,0),
+                labels = c("1000", "10000", "100000", "1000000")) +
+  labs(
+    x = "Scenario",
+    y = expression(bold("Annual export (kg y"^-1*")"))
+  ) +
+  theme_classic() +
+  theme(
+    text = element_text(family = "Times New Roman", 
+                        face = "bold",
+                        color = "black",
+                        size = 18),
+    legend.position = "none"
+  )
+
+Fig.7
+
+```
